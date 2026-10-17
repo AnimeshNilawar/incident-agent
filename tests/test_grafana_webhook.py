@@ -1,4 +1,6 @@
 
+from unittest.mock import patch
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -206,3 +208,24 @@ def test_webhook_rejects_invalid_alert_entries(client, firing_payload):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Each alert must be an object"
+
+
+def test_firing_alert_attempts_to_dispatch_investigation_job(
+    client,
+    firing_payload,
+):
+    with patch(
+        "app.api.grafana.dispatch_investigation_job",
+        return_value=True,
+    ) as dispatch:
+        response = send_webhook(client, firing_payload)
+
+    assert response.status_code == 200
+    assert response.json()["created"] == 1
+
+    dispatch.assert_called_once()
+
+    _db, job = dispatch.call_args.args
+
+    assert job.status == "pending"
+    assert job.incident_id is not None

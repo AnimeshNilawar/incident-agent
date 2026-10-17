@@ -6,12 +6,18 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import get_db
+from app.models.investigation_job import InvestigationJob
 from app.schemas.incident import IncidentCreate
 from app.services.incidents import create_or_update_incident
+from app.services.investigation_dispatcher import (
+    dispatch_investigation_job,
+)
+from app.services.investigation_jobs import create_investigation_job
 
 router = APIRouter(
     prefix="/api/v1/webhooks",
@@ -149,20 +155,44 @@ def process_alert(
         summary="\n\n".join(summary_parts),
     )
 
+    
+    
     incident, created = create_or_update_incident(db, incident_data)
 
-    # "completed" means the alert is no longer active.
-    # A later firing notification reopens a previously completed incident.
+    was_completed = incident.status == "completed"
+
+    # Create a job for a new or reopened firing incident.
+    if alert_state == "firing" and (created or was_completed):
+        create_investigation_job(db, incident)
+
     if alert_state == "resolved":
         incident.status = "completed"
-    elif incident.status == "completed":
+    elif alert_state == "firing" and was_completed:
         incident.status = "received"
 
+    # Persist the incident and job before contacting Cloud Tasks.
     db.commit()
     db.refresh(incident)
 
+    if alert_state == "firing":
+        # A previous queue attempt may have failed. Retry pending work
+        # when Grafana sends another notification for this incident.
+        pending_job = db.scalar(
+            select(InvestigationJob)
+            .where(
+                InvestigationJob.incident_id == incident.id,
+                InvestigationJob.status == "pending",
+            )
+            .order_by(InvestigationJob.created_at.desc())
+            .limit(1)
+        )
+
+        if pending_job is not None:
+            dispatch_investigation_job(db, pending_job)
+
     if alert_state == "resolved":
         return "resolved"
+
     return "created" if created else "updated"
 
 

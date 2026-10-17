@@ -86,8 +86,10 @@ password:
 
 ### Verify the target locally without exposing the connection string
 
-Set `DATABASE_URL` in the shell (not in `.env`, so it is not written to disk)
-and let the application describe the target. It parses the URL and prints only
+The inspector reads `DATABASE_URL` from the same configuration the application
+uses (`app.config.Settings`), so a value in `.env` is honoured and a value set
+in the shell wins over it — prefer the shell so the password is not written to
+disk. Let the application describe the target. It parses the URL and prints only
 the non-secret parts — host, port, database, username, driver, TLS mode, and
 *whether* a password is present. It opens **no** network connection, so it is
 safe to run before the database is reachable:
@@ -113,6 +115,42 @@ sslmode=require
 Confirm `host`, `port`, `sslmode`, and `username` before any migration; if
 `host`/`port` are not what you expect, stop. This command is also used in
 `docs/deployment.md` checklist step B.
+
+### Confirm real connectivity and authentication (read-only)
+
+Inspecting the target does not prove the database is reachable or that the
+credentials work. Before the first hosted migration, run the read-only
+connectivity check. It opens one connection and executes `SELECT 1` through the
+application's own engine configuration — the same `Settings`, `build_engine`
+and pooler-safe `prepare_threshold=None` path the app will use:
+
+```powershell
+$env:DATABASE_URL = "postgresql+psycopg://<USER>:<PASSWORD>@<SUPABASE_HOST>:6543/postgres?sslmode=require"
+.\.venv\Scripts\python.exe -m app.db.check_connection
+```
+
+Expected output (the same non-secret target fields, plus the result):
+
+```
+dialect=postgresql
+driver=psycopg
+host=<SUPABASE_HOST>
+port=6543
+database=postgres
+username=<USER>
+password_set=True
+sslmode=require
+connection=ok
+```
+
+- It **never** creates tables, runs migrations, or writes data — `SELECT 1` is
+  the only statement executed — so it is safe to run repeatedly, including
+  before the schema exists.
+- On failure it prints `connection=failed` and exits `1`, deliberately omitting
+  `DATABASE_URL`, the password, and the driver's error message (which can quote
+  the connection string). Check the printed target's `host`, `port`, `username`
+  and `sslmode` instead.
+- Exit code `2` means no target is configured at all.
 
 ## Migrations
 

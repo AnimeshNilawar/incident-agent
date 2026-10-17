@@ -285,16 +285,22 @@ and every IAM binding remain **unexercised**.
 - **Verify the target before migrating:** run the non-connecting inspector
   `python -m app.db.target` to print the target's host, port, database,
   username, and TLS mode *without* the password; confirm it is the intended
-  Supabase pooler (`:6543`, `sslmode=require`). There is no automatic
+  Supabase pooler (`:6543`, `sslmode=require`). Then run the read-only
+  connectivity check `python -m app.db.check_connection`, which opens one
+  connection and executes `SELECT 1` through the application's own engine
+  settings (it prints `connection=ok`, never the password) to confirm the
+  credentials really authenticate. There is no automatic
   production guard on the `alembic` command itself — the guard
   (`PRODUCTION_MARKERS`) applies only to the *integration test* fixture, so an
-  operator-set `DATABASE_URL` is trusted. Setting it in a shell (not `.env`)
-  avoids committing credentials.
+  operator-set `DATABASE_URL` is trusted. The inspector resolves it through the
+  application settings, so a shell value wins over `.env`; prefer the shell so
+  the password is not written to disk.
 - **Action (LOCAL command, CLOUD effect):**
 
   ```powershell
   $env:DATABASE_URL = "postgresql+psycopg://USER:PASSWORD@<SUPABASE_HOST>:6543/postgres?sslmode=require"
   .\.venv\Scripts\python.exe -m app.db.target      # confirm target, no password printed
+  .\.venv\Scripts\python.exe -m app.db.check_connection   # SELECT 1, read-only, no password printed
   .\.venv\Scripts\python.exe -m alembic upgrade head
   .\.venv\Scripts\python.exe -m alembic current
   .\.venv\Scripts\python.exe -m alembic check

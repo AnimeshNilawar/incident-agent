@@ -16,4 +16,4 @@ def test_root():
     response = client.get("/")
 
     assert response.status_code == 200
-    assert response.json()["service"] == "micuppa-incident-agent"
+    assert response.json()["service"] == "incident-agent"

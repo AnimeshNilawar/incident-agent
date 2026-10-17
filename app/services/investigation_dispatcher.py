@@ -4,7 +4,10 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from app.models.investigation_job import InvestigationJob
-from app.services.cloud_tasks import enqueue_investigation
+from app.services.cloud_tasks import (
+    enqueue_investigation,
+    is_retryable_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +26,29 @@ def dispatch_investigation_job(
             incident_id=job.incident_id,
         )
     except Exception as exc:
-        # Keep the job pending so a later dispatcher can retry it.
+        # A dispatch failure is not an investigation attempt, so it never
+        # increments ``attempts``: the job stays ``pending`` and a later
+        # recovery sweep retries it. Retryable API failures are expected to
+        # clear on their own, so they log at warning level. Permanent
+        # failures (missing configuration, denied permissions) never clear
+        # without operator action, so they log at error level to be
+        # alertable.
         job.last_error = str(exc)[:2000]
         job.updated_at = datetime.now(UTC)
         db.commit()
 
-        logger.warning(
-            "Could not enqueue investigation job %s; it remains pending",
-            job.id,
-            exc_info=True,
-        )
+        if is_retryable_error(exc):
+            logger.warning(
+                "Could not enqueue investigation job %s; it remains pending",
+                job.id,
+                exc_info=True,
+            )
+        else:
+            logger.exception(
+                "Non-retryable failure enqueuing investigation job %s; it "
+                "remains pending until the configuration is fixed",
+                job.id,
+            )
         return False
 
     job.status = "queued"

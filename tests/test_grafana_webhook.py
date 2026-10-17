@@ -19,6 +19,15 @@ def client(monkeypatch):
     monkeypatch.setattr(settings, "grafana_webhook_username", "grafana-agent")
     monkeypatch.setattr(settings, "grafana_webhook_password", "test-secret")
 
+    # The Grafana webhook writes incidents directly through the service layer,
+    # but the tests read them back over the (now authenticated) incident API.
+    monkeypatch.setattr(
+        settings, "incident_api_username", "incident-client"
+    )
+    monkeypatch.setattr(
+        settings, "incident_api_password", "test-incident-secret"
+    )
+
     # Keep test data isolated from the local application database.
     test_engine = create_engine(
         "sqlite://",
@@ -83,7 +92,10 @@ def send_webhook(client, payload, credentials=("grafana-agent", "test-secret")):
 
 
 def get_incidents(client):
-    response = client.get("/api/v1/incidents")
+    response = client.get(
+        "/api/v1/incidents",
+        auth=("incident-client", "test-incident-secret"),
+    )
     assert response.status_code == 200
     return response.json()
 
@@ -105,6 +117,37 @@ def test_webhook_rejects_invalid_credentials(client, firing_payload):
     )
 
     assert response.status_code == 401
+
+
+def test_webhook_fails_closed_when_credentials_are_not_configured(
+    client,
+    firing_payload,
+    monkeypatch,
+):
+    # Deployment guard: if the operator has not configured the webhook
+    # credentials, the endpoint must refuse every request (503) rather than
+    # accept an unauthenticated payload.
+    monkeypatch.setattr(settings, "grafana_webhook_username", "")
+    monkeypatch.setattr(settings, "grafana_webhook_password", "")
+
+    response = send_webhook(client, firing_payload)
+
+    assert response.status_code == 503
+
+
+def test_webhook_error_responses_do_not_echo_credentials(
+    client,
+    firing_payload,
+):
+    response = send_webhook(
+        client,
+        firing_payload,
+        credentials=("grafana-agent", "wrong-password"),
+    )
+
+    assert response.status_code == 401
+    assert "wrong-password" not in response.text
+    assert "test-secret" not in response.text
 
 
 def test_firing_alert_creates_incident(client, firing_payload):

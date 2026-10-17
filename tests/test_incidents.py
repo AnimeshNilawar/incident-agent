@@ -4,13 +4,24 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 
+INCIDENT_API_USERNAME = "incident-client"
+INCIDENT_API_PASSWORD = "test-incident-secret"
+
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    monkeypatch.setattr(
+        settings, "incident_api_username", INCIDENT_API_USERNAME
+    )
+    monkeypatch.setattr(
+        settings, "incident_api_password", INCIDENT_API_PASSWORD
+    )
+
     test_engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -35,6 +46,9 @@ def client():
     app.dependency_overrides[get_db] = override_get_db
 
     with TestClient(app) as test_client:
+        # The incident API requires authentication; these tests exercise the
+        # incident behaviour, so authenticate the client by default.
+        test_client.auth = (INCIDENT_API_USERNAME, INCIDENT_API_PASSWORD)
         yield test_client
 
     app.dependency_overrides.clear()

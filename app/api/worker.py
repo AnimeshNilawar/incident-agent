@@ -42,10 +42,7 @@ def verify_cloud_tasks_request(
         )
 
     expected_email = settings.cloud_tasks_service_account_email
-    expected_audience = (
-        settings.investigation_worker_audience
-        or settings.investigation_worker_url
-    )
+    expected_audience = settings.effective_worker_audience
 
     if not expected_email or not expected_audience:
         raise HTTPException(

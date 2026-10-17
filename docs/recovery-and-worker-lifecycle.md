@@ -5,6 +5,12 @@ retried, and recovered. It covers the internal recovery endpoint, the
 concurrency-safe claim/lease model, and the PostgreSQL integration suite
 that verifies the concurrency guarantees.
 
+Cloud Tasks queue assumptions, OIDC/audience configuration, IAM, and the
+per-response retry semantics are documented separately in
+[`cloud-tasks-deployment.md`](cloud-tasks-deployment.md). The container
+image, health checks, and the API/worker Cloud Run split are in
+[`deployment.md`](deployment.md).
+
 ## Job state model
 
 `InvestigationJob.status` moves through:
@@ -198,6 +204,15 @@ endpoint on a fixed schedule.
   limit is authoritative; when Cloud Tasks redelivers past it, the worker
   returns `attempt_limit_reached` without running work.
 
+Cloud Tasks HTTP delivery is at-least-once and treats **only a 2xx response
+as success**, so every terminal or idempotent outcome returns `2xx` and every
+"retry later" outcome returns a non-2xx. Because the application only
+increments `attempts` when a claim succeeds, non-claim rejections (409/404/
+401/403/503) are bounded only by the queue's retry config — which is why a
+small queue `max_attempts` matters. The full response-by-response mapping,
+queue configuration assumptions, and the required IAM bindings are in
+[`cloud-tasks-deployment.md`](cloud-tasks-deployment.md).
+
 ## Known limitations and PostgreSQL integration tests
 
 The concurrency logic uses portable atomic conditional `UPDATE`
@@ -232,9 +247,10 @@ The suite verifies, against real PostgreSQL transactions:
 - `POSTGRES_TEST_DATABASE_URL` must point at a dedicated PostgreSQL test
   server. The URL is used only to `CREATE DATABASE` / `DROP DATABASE`; it
   is never the production Supabase connection and has no default.
-- Each test creates a **uniquely named throwaway database**, builds the
-  schema inside it, and drops it afterwards. No existing/shared database is
-  ever truncated or modified, and tests are fully isolated from each other.
+- Each test creates a **uniquely named throwaway database**, applies the real
+  Alembic migrations inside it, and drops it afterwards. No existing/shared
+  database is ever truncated or modified, and tests are fully isolated from
+  each other.
 - If the configured URL appears to target a hosted/production host
   (`supabase`, `amazonaws`, `rds`, `neon.tech`, `azure`, `cloudsql`,
   `googleusercontent`, `heroku`), the fixture fails loudly **before**
@@ -242,10 +258,10 @@ The suite verifies, against real PostgreSQL transactions:
 
 ### Running the tests
 
-Ordinary suite (SQLite, no PostgreSQL required):
+Ordinary suite (SQLite, no PostgreSQL required). `pytest.ini` sets
+`pythonpath = .`, so no `PYTHONPATH` is needed:
 
 ```powershell
-$env:PYTHONPATH = (Get-Location).Path
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
@@ -259,14 +275,15 @@ docker run -d --name pg-integration-test `
   -e POSTGRES_DB=incident_agent_maintenance `
   -p 127.0.0.1:55432:5432 postgres:16
 
-$env:PYTHONPATH = (Get-Location).Path
 $env:POSTGRES_TEST_DATABASE_URL = "postgresql+psycopg://inctest:inctest-local-only@127.0.0.1:55432/incident_agent_maintenance"
 .\.venv\Scripts\python.exe -m pytest -m postgres_integration -v
 ```
 
 Integration tests are marked `postgres_integration` (registered in
 `pytest.ini`). They are never run against a real, shared, or production
-database.
+database. Both suites also run automatically in CI
+(`.github/workflows/ci.yml`) against an ephemeral `postgres:16` service
+container.
 
 Lease renewal is not implemented because the current investigation body is
 a placeholder that completes within one request. A future real executor

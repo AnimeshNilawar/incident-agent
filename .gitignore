@@ -5,3 +5,6 @@ __pycache__/
 .ruff_cache/
 .env
 .coverage
+
+# Local development databases (SQLite). Never commit local data.
+*.db

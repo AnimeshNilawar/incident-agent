@@ -1,0 +1,25 @@
+# --- VCS, CI, and tool caches ---------------------------------------------
+.git
+.github
+.gitignore
+.pytest_cache
+.ruff_cache
+.venv
+**/__pycache__
+*.py[cod]
+
+# --- Environment files and credentials -------------------------------------
+# Never copy anything that could hold a secret into an image.
+.env
+.env.*
+!.env.example
+
+# --- Local databases and artifacts -----------------------------------------
+*.db
+*.sqlite3
+
+# --- Not needed at runtime --------------------------------------------------
+# Tests, docs and linters run from the checkout in CI, not inside the image.
+tests
+docs
+pytest.ini

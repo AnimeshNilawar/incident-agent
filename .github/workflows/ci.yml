@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The project is developed on 3.14; 3.13 is also supported and is
+        # covered so a version-specific regression is caught early.
+        python-version: ["3.13", "3.14"]
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: inctest
+          POSTGRES_PASSWORD: inctest-local-only
+          POSTGRES_DB: incident_agent_maintenance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U inctest -d incident_agent_maintenance"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # DATABASE_URL is deliberately NOT set job-wide. A PostgreSQL DATABASE_URL
+    # makes the shared model metadata schema-qualified, which would break the
+    # SQLite suite; it is set only for the migration step below.
+    #
+    # Nothing here needs Supabase, GCP, Grafana, deployment credentials, or any
+    # other cloud resource or secret.
+    env:
+      POSTGRES_TEST_DATABASE_URL: postgresql+psycopg://inctest:inctest-local-only@127.0.0.1:5432/incident_agent_maintenance
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Lint with Ruff
+        run: python -m ruff check app tests
+
+      - name: SQLite / unit test suite
+        run: python -m pytest -q -m "not postgres_integration"
+
+      - name: Apply migrations and check for model drift
+        env:
+          DATABASE_URL: postgresql+psycopg://inctest:inctest-local-only@127.0.0.1:5432/incident_agent_maintenance
+        run: |
+          python -m alembic upgrade head
+          python -m alembic check
+
+      - name: PostgreSQL integration test suite
+        run: python -m pytest -q -m postgres_integration
+
+  container:
+    name: Container build and smoke test
+    runs-on: ubuntu-latest
+
+    # Builds and exercises the production image with only a local SQLite
+    # database. No registry push, no cloud credentials, no deployment.
+    # NOTE: this job has not yet been executed on a real GitHub runner.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t incident-agent:ci .
+
+      - name: Smoke test the image (API role, local SQLite)
+        run: |
+          docker run -d --name incident-agent-api \
+            -e ENVIRONMENT=local \
+            -e DATABASE_URL=sqlite:////tmp/incident_agent.db \
+            -e INCIDENT_API_USERNAME=ci-incident \
+            -e INCIDENT_API_PASSWORD=ci-secret-local-only \
+            -e PORT=8080 \
+            -p 8080:8080 \
+            incident-agent:ci
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/health/live >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          curl -fsS http://127.0.0.1:8080/health/live
+          curl -fsS http://127.0.0.1:8080/health/ready
+
+          # The incident API must reject anonymous callers and accept the
+          # configured basic-auth credential.
+          no_creds=$(curl -s -o /dev/null -w '%{http_code}' \
+            http://127.0.0.1:8080/api/v1/incidents)
+          with_creds=$(curl -s -o /dev/null -w '%{http_code}' \
+            -u ci-incident:ci-secret-local-only \
+            http://127.0.0.1:8080/api/v1/incidents)
+
+          echo "incidents no-creds=$no_creds with-creds=$with_creds"
+          test "$no_creds" = "401"
+          test "$with_creds" = "200"
+          docker rm -f incident-agent-api
+
+      - name: Verify the worker role hides public routes
+        run: |
+          docker run -d --name incident-agent-worker \
+            -e ENVIRONMENT=local \
+            -e DATABASE_URL=sqlite:////tmp/incident_agent.db \
+            -e SERVICE_ROLE=worker \
+            -e PORT=8080 \
+            -p 8081:8080 \
+            incident-agent:ci
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8081/health/live >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          incidents_code=$(curl -s -o /dev/null -w '%{http_code}' \
+            http://127.0.0.1:8081/api/v1/incidents)
+          worker_code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' \
+            -d '{"job_id":"00000000-0000-0000-0000-000000000000","incident_id":"00000000-0000-0000-0000-000000000000"}' \
+            http://127.0.0.1:8081/api/v1/worker/investigate)
+
+          echo "incidents=$incidents_code worker=$worker_code"
+          test "$incidents_code" = "404"
+          test "$worker_code" = "401"
+          docker rm -f incident-agent-worker

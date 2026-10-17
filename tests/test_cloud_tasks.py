@@ -4,11 +4,25 @@ import uuid
 from unittest.mock import Mock
 
 import pytest
-from google.api_core.exceptions import AlreadyExists
+from google.api_core.exceptions import (
+    Aborted,
+    AlreadyExists,
+    DeadlineExceeded,
+    InternalServerError,
+    InvalidArgument,
+    NotFound,
+    PermissionDenied,
+    ServiceUnavailable,
+    TooManyRequests,
+    Unauthenticated,
+)
 from google.cloud import tasks_v2
 
 from app.config import settings
-from app.services.cloud_tasks import enqueue_investigation
+from app.services.cloud_tasks import (
+    enqueue_investigation,
+    is_retryable_error,
+)
 
 
 @pytest.fixture
@@ -111,3 +125,90 @@ def test_enqueue_rejects_missing_configuration(monkeypatch):
 
     with pytest.raises(RuntimeError, match="GCP_PROJECT_ID"):
         enqueue_investigation(uuid.uuid4(), uuid.uuid4())
+
+
+def test_enqueue_uses_explicit_audience_when_configured(
+    configured_tasks, monkeypatch
+):
+    explicit_audience = "https://worker.example.test"
+    monkeypatch.setattr(
+        settings, "investigation_worker_audience", explicit_audience
+    )
+
+    client = Mock(spec=tasks_v2.CloudTasksClient)
+    client.queue_path.return_value = "queue-path"
+    client.task_path.return_value = "task-path"
+    client.create_task.return_value.name = "task-path"
+
+    enqueue_investigation(uuid.uuid4(), uuid.uuid4(), client=client)
+
+    task = client.create_task.call_args.kwargs["request"]["task"]
+    assert task["http_request"]["oidc_token"]["audience"] == (
+        explicit_audience
+    )
+
+
+@pytest.mark.parametrize(
+    "missing_setting, env_name",
+    [
+        ("cloud_tasks_location", "CLOUD_TASKS_LOCATION"),
+        ("cloud_tasks_queue", "CLOUD_TASKS_QUEUE"),
+    ],
+)
+def test_enqueue_rejects_missing_queue_configuration(
+    configured_tasks, monkeypatch, missing_setting, env_name
+):
+    monkeypatch.setattr(settings, missing_setting, "")
+
+    with pytest.raises(RuntimeError, match=env_name):
+        enqueue_investigation(uuid.uuid4(), uuid.uuid4())
+
+
+@pytest.mark.parametrize(
+    "retryable",
+    [
+        TooManyRequests("rate limited"),
+        ServiceUnavailable("backend unavailable"),
+        InternalServerError("internal error"),
+        DeadlineExceeded("deadline exceeded"),
+        Aborted("aborted"),
+    ],
+)
+def test_transient_cloud_tasks_errors_are_retryable(retryable):
+    assert is_retryable_error(retryable) is True
+
+
+@pytest.mark.parametrize(
+    "permanent",
+    [
+        PermissionDenied("no permission"),
+        Unauthenticated("bad credentials"),
+        NotFound("queue missing"),
+        InvalidArgument("bad request"),
+        RuntimeError("Missing Cloud Tasks configuration"),
+    ],
+)
+def test_permanent_failures_are_not_retryable(permanent):
+    assert is_retryable_error(permanent) is False
+
+
+def test_effective_worker_audience_prefers_explicit_value(
+    configured_tasks, monkeypatch
+):
+    monkeypatch.setattr(
+        settings,
+        "investigation_worker_audience",
+        "https://worker.example.test",
+    )
+
+    assert settings.effective_worker_audience == (
+        "https://worker.example.test"
+    )
+
+
+def test_effective_worker_audience_falls_back_to_worker_url(
+    configured_tasks,
+):
+    assert settings.effective_worker_audience == (
+        settings.investigation_worker_url
+    )

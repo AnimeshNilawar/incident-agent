@@ -1,10 +1,46 @@
 import json
 import uuid
 
-from google.api_core.exceptions import AlreadyExists
+from google.api_core.exceptions import (
+    Aborted,
+    AlreadyExists,
+    BadGateway,
+    DeadlineExceeded,
+    GatewayTimeout,
+    InternalServerError,
+    ResourceExhausted,
+    ServiceUnavailable,
+    TooManyRequests,
+    Unknown,
+)
 from google.cloud import tasks_v2
 
 from app.config import settings
+
+# Cloud Tasks API failures that are worth retrying. Everything else
+# (permission denied, not found, invalid argument, missing configuration)
+# cannot succeed on a plain retry and is surfaced differently by the caller.
+RETRYABLE_CLOUD_TASKS_ERRORS: tuple[type[BaseException], ...] = (
+    Aborted,
+    BadGateway,
+    DeadlineExceeded,
+    GatewayTimeout,
+    InternalServerError,
+    ResourceExhausted,
+    ServiceUnavailable,
+    TooManyRequests,
+    Unknown,
+)
+
+
+def is_retryable_error(exc: BaseException) -> bool:
+    """Return ``True`` when a Cloud Tasks failure is likely transient.
+
+    The classification drives how the dispatcher logs the failure. It does
+    not decide recovery: a job whose dispatch failed is always left
+    ``pending`` so a later sweep can retry it.
+    """
+    return isinstance(exc, RETRYABLE_CLOUD_TASKS_ERRORS)
 
 
 def enqueue_investigation(
@@ -15,6 +51,8 @@ def enqueue_investigation(
     """Enqueue an investigation using a deterministic Cloud Tasks task ID."""
     required_settings = {
         "GCP_PROJECT_ID": settings.gcp_project_id,
+        "CLOUD_TASKS_LOCATION": settings.cloud_tasks_location,
+        "CLOUD_TASKS_QUEUE": settings.cloud_tasks_queue,
         "INVESTIGATION_WORKER_URL": settings.investigation_worker_url,
         "CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL": (
             settings.cloud_tasks_service_account_email
@@ -49,10 +87,7 @@ def enqueue_investigation(
         "incident_id": str(incident_id),
     }
 
-    audience = (
-        settings.investigation_worker_audience
-        or settings.investigation_worker_url
-    )
+    audience = settings.effective_worker_audience
 
     task = {
         "name": task_name,

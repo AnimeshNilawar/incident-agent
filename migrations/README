@@ -1,0 +1,24 @@
+# Alembic migrations — Micuppa Incident Agent
+
+This directory holds the Alembic migration environment for the incident
+agent's tables. The tables live in a dedicated PostgreSQL schema
+(`DATABASE_SCHEMA`, default `incident_agent`) so they are isolated from the
+host application's `public` schema.
+
+## Generating and applying migrations
+
+```powershell
+# Set the deployed/development PostgreSQL URL first, e.g. in .env or the shell.
+$env:DATABASE_URL = "postgresql+psycopg://user:password@host:5432/dbname"
+
+.\.venv\Scripts\python.exe -m alembic revision --autogenerate -m "describe change"
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
+
+Migrations are **not** applied automatically at application startup. Local
+SQLite development still uses `Base.metadata.create_all()` for convenience;
+any PostgreSQL target is expected to be migrated explicitly with Alembic.
+
+The database URL is never stored in `alembic.ini`. It is resolved at runtime
+(see `env.py`) from `DATABASE_URL`, a `-x db_url=...` argument, or a `db_url`
+attribute set on the Alembic `Config`.

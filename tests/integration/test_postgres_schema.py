@@ -30,9 +30,12 @@ from app.config import settings
 from app.db.base import Base
 from app.models.incident import Incident
 from app.models.investigation_job import InvestigationJob
+from app.models.investigation_report import InvestigationReport
 from app.schemas.incident import IncidentCreate
+from app.schemas.investigation import EvidenceItem, InvestigationReportData
 from app.services.incidents import create_or_update_incident
 from app.services.investigation_jobs import create_investigation_job
+from app.services.investigation_reports import persist_investigation_report
 from app.services.job_lifecycle import (
     ClaimOutcome,
     claim_job,
@@ -44,7 +47,11 @@ pytestmark = pytest.mark.postgres_integration
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 SCHEMA = settings.database_schema
-AGENT_TABLES = {"incidents", "investigation_jobs"}
+AGENT_TABLES = {
+    "incidents",
+    "investigation_jobs",
+    "investigation_reports",
+}
 
 
 @contextmanager
@@ -147,6 +154,44 @@ def test_investigation_job_foreign_key_unique_and_indexes(
     assert indexes["ix_investigation_jobs_status_created"]["column_names"] == [
         "status",
         "created_at",
+    ]
+
+
+def test_investigation_report_unique_fk_and_index(migrated_postgres_url):
+    with _connection(migrated_postgres_url) as connection:
+        inspector = inspect(connection)
+        foreign_keys = inspector.get_foreign_keys(
+            "investigation_reports", schema=SCHEMA
+        )
+        uniques = inspector.get_unique_constraints(
+            "investigation_reports", schema=SCHEMA
+        )
+        indexes = {
+            index["name"]: index
+            for index in inspector.get_indexes(
+                "investigation_reports", schema=SCHEMA
+            )
+        }
+
+    # job_id and incident_id both CASCADE from their parents.
+    fk_by_column = {
+        fk["constrained_columns"][0]: fk for fk in foreign_keys
+    }
+    assert set(fk_by_column) == {"job_id", "incident_id"}
+    assert fk_by_column["job_id"]["referred_table"] == "investigation_jobs"
+    assert fk_by_column["job_id"]["options"].get("ondelete") == "CASCADE"
+    assert fk_by_column["incident_id"]["referred_table"] == "incidents"
+    assert fk_by_column["incident_id"]["options"].get("ondelete") == "CASCADE"
+
+    # One report per job is enforced at the database level.
+    assert any(
+        unique["name"] == "uq_investigation_reports_job_id"
+        and unique["column_names"] == ["job_id"]
+        for unique in uniques
+    )
+
+    assert indexes["ix_investigation_reports_incident_id"]["column_names"] == [
+        "incident_id"
     ]
 
 
@@ -254,6 +299,94 @@ def test_investigation_job_creation_and_lifecycle_on_postgres(
         job = db.get(InvestigationJob, job_id)
         assert job.status == "completed"
         assert job.attempts == 1
+
+
+def test_investigation_report_persists_on_postgres(pg_session_factory):
+    """Report persistence round-trip on the migrated PostgreSQL tables."""
+    with pg_session_factory() as db:
+        incident = Incident(
+            fingerprint=f"pg-report-{uuid.uuid4()}",
+            title="BackendHighCPU",
+            source="grafana",
+            severity="high",
+            status="received",
+            service_name="micuppa-backend-india",
+            summary="CPU above threshold",
+        )
+        db.add(incident)
+        db.flush()
+
+        job, _ = create_investigation_job(db, incident)
+        db.commit()
+        job_id, incident_id = job.id, incident.id
+
+    report = InvestigationReportData(
+        job_id=job_id,
+        incident_id=incident_id,
+        status="completed",
+        probable_root_cause="Sustained CPU load on the backend.",
+        root_cause_evidence_ids=["alert-summary"],
+        explanation="The alert reports sustained CPU above threshold.",
+        confidence=0.7,
+        suggested_fixes=[
+            {
+                "title": "Inspect recent deployments",
+                "description": "Check the rollout timeline.",
+                "evidence_ids": ["alert-summary"],
+            }
+        ],
+        evidence=[
+            EvidenceItem(
+                id="alert-summary",
+                source="grafana_alert",
+                description="Alert summary.",
+                status="available",
+                content="CPU above threshold",
+            ),
+            EvidenceItem(
+                id="gap-backend-logs",
+                source="backend_logs",
+                description="Logs not collected yet.",
+                status="missing",
+            ),
+        ],
+        limitations=["Backend logs were not collected"],
+        model_name="pg-test-model",
+    )
+
+    with pg_session_factory() as db:
+        row, created = persist_investigation_report(db, report)
+        assert created is True
+        row_id = row.id
+
+    # Reading from a fresh session returns the structured fields intact.
+    with pg_session_factory() as db:
+        stored = db.get(InvestigationReport, row_id)
+        assert stored.status == "completed"
+        assert stored.confidence == 0.7
+        assert stored.root_cause_evidence_ids == ["alert-summary"]
+        assert stored.suggested_fixes[0]["title"] == "Inspect recent deployments"
+        assert {item["id"] for item in stored.evidence} == {
+            "alert-summary",
+            "gap-backend-logs",
+        }
+
+    # A repeated attempt for the same job replaces the report in place.
+    repeated = report.model_copy(update={"confidence": 0.9})
+
+    with pg_session_factory() as db:
+        row2, created2 = persist_investigation_report(db, repeated)
+        assert created2 is False
+        assert row2.id == row_id
+
+    with pg_session_factory() as db:
+        rows = db.scalars(
+            select(InvestigationReport).where(
+                InvestigationReport.job_id == job_id
+            )
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].confidence == 0.9
 
 
 def test_reapplying_migrations_is_safe(

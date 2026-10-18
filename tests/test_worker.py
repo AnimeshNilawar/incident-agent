@@ -105,13 +105,16 @@ def test_worker_completes_queued_job(worker_client):
     client, SessionLocal = worker_client
     job_id, incident_id = create_job(SessionLocal)
 
-    response = client.post(
-        "/api/v1/worker/investigate",
-        json={
-            "job_id": str(job_id),
-            "incident_id": str(incident_id),
-        },
-    )
+    # Lifecycle-only test: the engine itself is covered in
+    # tests/test_investigation_engine.py and needs a configured provider.
+    with patch("app.api.worker.execute_investigation"):
+        response = client.post(
+            "/api/v1/worker/investigate",
+            json={
+                "job_id": str(job_id),
+                "incident_id": str(incident_id),
+            },
+        )
 
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
@@ -187,7 +190,7 @@ def test_worker_does_not_run_investigation_twice(worker_client):
         "incident_id": str(incident_id),
     }
 
-    with patch("app.api.worker.run_investigation_placeholder") as investigate:
+    with patch("app.api.worker.execute_investigation") as investigate:
         first = client.post("/api/v1/worker/investigate", json=payload)
         second = client.post("/api/v1/worker/investigate", json=payload)
 
@@ -239,7 +242,7 @@ def test_worker_records_transient_failure_and_allows_retry(worker_client):
     }
 
     with patch(
-        "app.api.worker.run_investigation_placeholder",
+        "app.api.worker.execute_investigation",
         side_effect=RuntimeError("temporary downstream outage"),
     ):
         failed = client.post("/api/v1/worker/investigate", json=payload)
@@ -254,7 +257,7 @@ def test_worker_records_transient_failure_and_allows_retry(worker_client):
         assert job.last_error == "temporary downstream outage"
 
     # Cloud Tasks redelivery can retry a transiently failed job.
-    with patch("app.api.worker.run_investigation_placeholder"):
+    with patch("app.api.worker.execute_investigation"):
         retried = client.post("/api/v1/worker/investigate", json=payload)
 
     assert retried.status_code == 200
@@ -275,7 +278,7 @@ def test_worker_enforces_attempt_limit(worker_client):
         max_attempts=3,
     )
 
-    with patch("app.api.worker.run_investigation_placeholder") as investigate:
+    with patch("app.api.worker.execute_investigation") as investigate:
         response = client.post(
             "/api/v1/worker/investigate",
             json={
@@ -298,7 +301,10 @@ def test_worker_reports_superseded_completion(worker_client):
     client, SessionLocal = worker_client
     job_id, incident_id = create_job(SessionLocal)
 
-    with patch("app.api.worker.complete_job", return_value=False) as complete:
+    with (
+        patch("app.api.worker.execute_investigation"),
+        patch("app.api.worker.complete_job", return_value=False) as complete,
+    ):
         response = client.post(
             "/api/v1/worker/investigate",
             json={

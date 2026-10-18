@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import get_db
+from app.models.incident import Incident
+from app.models.investigation_job import InvestigationJob
+from app.services.investigation_engine import run_investigation
 from app.services.job_lifecycle import (
     ClaimOutcome,
     claim_job,
@@ -82,21 +85,30 @@ def verify_cloud_tasks_request(
         )
 
 
-def run_investigation_placeholder(
+def execute_investigation(
+    db: Session,
     job_id: uuid.UUID,
     incident_id: uuid.UUID,
 ) -> None:
-    """Placeholder for the future LLM investigation.
+    """Run the investigation engine for a claimed job.
 
-    No production logs, source code, or AI calls happen yet. This function
-    exists so the worker's claim/lease lifecycle can be exercised and tested
-    without implementing real investigation behavior.
+    The engine collects evidence, consults the configured LLM provider,
+    validates the structured findings, and persists the report. Any
+    failure raises, so the caller's existing claim-fencing records the
+    error against this attempt and Cloud Tasks may retry.
     """
-    logger.info(
-        "Placeholder investigation executed for job %s, incident %s",
-        job_id,
-        incident_id,
-    )
+    job = db.get(InvestigationJob, job_id)
+    incident = db.get(Incident, incident_id) if job else None
+
+    # A successful claim proves the job row exists; the foreign key
+    # guarantees the incident does. Guard anyway so a racing deletion
+    # surfaces as a recorded failure rather than an AttributeError.
+    if job is None or incident is None:
+        raise LookupError(
+            "Investigation job or incident disappeared after claim"
+        )
+
+    run_investigation(db, job=job, incident=incident)
 
 
 @router.post(
@@ -153,8 +165,15 @@ def investigate(
         )
 
     try:
-        run_investigation_placeholder(payload.job_id, payload.incident_id)
+        execute_investigation(db, payload.job_id, payload.incident_id)
     except Exception as exc:
+        # The engine writes to the database; a failure may have left the
+        # session mid-transaction. Roll back (nothing committed by this
+        # attempt survives anyway) so fail_job can record the error
+        # instead of raising PendingRollbackError. The claim itself was
+        # committed by claim_job and is unaffected.
+        db.rollback()
+
         # Record the failure against this specific claim. Cloud Tasks retries
         # on the 5xx response, and the attempt limit bounds how often.
         fail_job(

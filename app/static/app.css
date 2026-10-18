@@ -1,0 +1,605 @@
+/* Micuppa Incident Dashboard — plain CSS, no build step.
+   Desktop-first: a dense table on wide screens, stacked cards on
+   mobile. Deliberately no animations or charts. */
+
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --border: #d9dde3;
+  --text: #1d2733;
+  --text-muted: #5b6675;
+  --accent: #1f4f8f;
+  --accent-dark: #163a69;
+  --danger-bg: #fdecec;
+  --danger-border: #e6b3b3;
+  --danger-text: #8f1d1d;
+  --warn-bg: #fff6e5;
+  --warn-border: #e8c887;
+  --warn-text: #7a5200;
+  --ok-bg: #e8f5ec;
+  --ok-border: #a9d4b8;
+  --ok-text: #1c6b36;
+  --mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas,
+    monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* --- Header ---------------------------------------------------------- */
+
+.topbar {
+  background: var(--accent-dark);
+  color: #fff;
+}
+
+.topbar-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 14px 20px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.topbar-note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #c8d6ea;
+}
+
+/* --- Page ------------------------------------------------------------- */
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.view[hidden] {
+  display: none;
+}
+
+.state-note {
+  margin: 24px 0;
+  color: var(--text-muted);
+}
+
+.error-banner {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  border-radius: 6px;
+  color: var(--danger-text);
+  white-space: pre-wrap;
+}
+
+/* --- Toolbar / filters -------------------------------------------------- */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.toolbar-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.filter select {
+  min-width: 160px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.button {
+  padding: 8px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--accent-dark);
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* --- Incident table ----------------------------------------------------- */
+
+.table-wrap {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.incident-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.incident-table th,
+.incident-table td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.incident-table thead th {
+  background: #eef1f5;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.incident-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.incident-table tbody tr:hover {
+  background: #f7f9fc;
+}
+
+.incident-title a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.incident-title a:hover {
+  text-decoration: underline;
+}
+
+.cell-muted {
+  color: var(--text-muted);
+}
+
+/* --- Badges -------------------------------------------------------------- */
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.badge-sev-critical {
+  background: #fbe5e5;
+  border-color: #e39a9a;
+  color: #a11;
+}
+
+.badge-sev-high {
+  background: #fdeee0;
+  border-color: #eab684;
+  color: #9a4a08;
+}
+
+.badge-sev-medium {
+  background: #fdf6dd;
+  border-color: #ddc978;
+  color: #7a5d00;
+}
+
+.badge-sev-low {
+  background: #e9eef6;
+  border-color: #aebfd8;
+  color: #33507e;
+}
+
+.badge-status {
+  background: #eef1f5;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.badge-status-completed {
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+  color: var(--ok-text);
+}
+
+.badge-status-failed {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.badge-status-running,
+.badge-status-investigating,
+.badge-status-queued {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  color: var(--warn-text);
+}
+
+.badge-inconclusive {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+  color: var(--warn-text);
+}
+
+.badge-none {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+/* --- Detail view ---------------------------------------------------------- */
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 14px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.back-link:hover {
+  text-decoration: underline;
+}
+
+.detail-header h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.card {
+  margin-bottom: 18px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.card h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.card h4 {
+  margin: 14px 0 6px;
+  font-size: 14px;
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.meta-grid dt {
+  color: var(--text-muted);
+}
+
+.meta-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.summary-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.notice {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.notice-ai {
+  background: #eef1f5;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.notice-advisory {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn-text);
+}
+
+.notice-none {
+  color: var(--text-muted);
+}
+
+/* --- Report ----------------------------------------------------------------- */
+
+.root-cause {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.explanation {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.confidence {
+  font-weight: 650;
+}
+
+.citation-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.citation-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #eef1f5;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.citation-chip:hover {
+  background: #e2e8f1;
+}
+
+.limitation-list,
+.fix-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.limitation-list li,
+.fix-list > li {
+  margin-bottom: 6px;
+}
+
+.fix-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.fix {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.fix-title {
+  margin: 0 0 4px;
+  font-weight: 650;
+}
+
+.fix-description {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* --- Evidence ---------------------------------------------------------------- */
+
+.evidence-count {
+  margin: -4px 0 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.evidence-item {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.evidence-item-missing {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.evidence-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  padding: 9px 12px;
+  background: #f2f4f8;
+  border-bottom: 1px solid var(--border);
+}
+
+.evidence-item-missing .evidence-head {
+  background: transparent;
+  border-bottom: none;
+}
+
+.evidence-source {
+  font-weight: 650;
+  font-size: 13px;
+}
+
+.evidence-id {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.evidence-observed {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.evidence-body {
+  padding: 9px 12px;
+  font-size: 14px;
+}
+
+.evidence-description {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.evidence-gap-label {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  background: #fff;
+  border: 1px solid var(--warn-border);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--warn-text);
+}
+
+.evidence-details summary {
+  margin-top: 8px;
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.evidence-content {
+  margin: 8px 0 0;
+  padding: 10px;
+  background: #f7f8fa;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.evidence-meta {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 3px 12px;
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.evidence-meta dt {
+  color: var(--text-muted);
+}
+
+.evidence-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* --- Mobile: table rows become stacked cards --------------------------------- */
+
+@media (max-width: 860px) {
+  .page {
+    padding: 14px;
+  }
+
+  .incident-table thead {
+    display: none;
+  }
+
+  .incident-table,
+  .incident-table tbody,
+  .incident-table tr,
+  .incident-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .incident-table tr {
+    border-bottom: 1px solid var(--border);
+    padding: 6px 0;
+  }
+
+  .incident-table tr:last-child {
+    border-bottom: none;
+  }
+
+  .incident-table td {
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    border-bottom: none;
+    padding: 5px 12px;
+  }
+
+  .incident-table td::before {
+    content: attr(data-label);
+    flex: 0 0 40%;
+    font-size: 12px;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+  }
+
+  .meta-grid,
+  .evidence-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .meta-grid dt,
+  .evidence-meta dt {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+}

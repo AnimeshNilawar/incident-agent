@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Micuppa Incident Dashboard</title>
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <h1>Micuppa Incident Dashboard</h1>
+      <p class="topbar-note">Read-only viewer &middot; investigation reports are advisory and never auto-applied</p>
+    </div>
+  </header>
+
+  <main class="page">
+    <div id="error-banner" class="error-banner" hidden role="alert"></div>
+
+    <!-- Incident list ------------------------------------------------- -->
+    <section id="view-list" class="view" aria-label="Incident list">
+      <div class="toolbar">
+        <div class="toolbar-filters">
+          <label class="filter">
+            <span>Severity</span>
+            <select id="filter-severity">
+              <option value="">All severities</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+          <label class="filter">
+            <span>Status</span>
+            <select id="filter-status">
+              <option value="">All statuses</option>
+              <option value="received">Received</option>
+              <option value="queued">Queued</option>
+              <option value="investigating">Investigating</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+            </select>
+          </label>
+        </div>
+        <button id="refresh-button" type="button" class="button">Refresh</button>
+      </div>
+
+      <p id="list-loading" class="state-note" hidden>Loading incidents&hellip;</p>
+      <p id="list-empty" class="state-note" hidden>No incidents yet. Alerts arrive here once the Grafana webhook creates them.</p>
+      <p id="list-no-match" class="state-note" hidden>No incidents match the selected filters.</p>
+
+      <div class="table-wrap">
+        <table class="incident-table">
+          <thead>
+            <tr>
+              <th scope="col">Incident</th>
+              <th scope="col">Service</th>
+              <th scope="col">Severity</th>
+              <th scope="col">Status</th>
+              <th scope="col">First seen</th>
+              <th scope="col">Last seen</th>
+              <th scope="col">Investigation</th>
+              <th scope="col">Report</th>
+            </tr>
+          </thead>
+          <tbody id="incident-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Incident detail ------------------------------------------------ -->
+    <section id="view-detail" class="view" hidden aria-label="Incident detail">
+      <a class="back-link" href="#/">&larr; All incidents</a>
+      <div id="detail-content"></div>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

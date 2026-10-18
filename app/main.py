@@ -1,11 +1,14 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 import app.models
 import app.models.incident  # Registers the model with Base.metadata
+from app.api.dashboard import router as dashboard_router
 from app.api.grafana import router as grafana_router
 from app.api.health import router as health_router
 from app.api.incidents import router as incidents_router
@@ -16,6 +19,11 @@ from app.db.base import Base
 from app.db.session import engine
 
 logger = logging.getLogger(__name__)
+
+# The dashboard's static single-page viewer (HTML/CSS/JS, no build step).
+# Lives inside ``app/`` so the container image (``COPY app ./app``) ships
+# it without any packaging change.
+DASHBOARD_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 @asynccontextmanager
@@ -41,7 +49,8 @@ def create_app(service_role: str | None = None) -> FastAPI:
 
     * ``all`` (default) - every route in one process. This is the local
       development and test behaviour, and requires no extra configuration.
-    * ``api`` - the public incident API and Grafana webhook only.
+    * ``api`` - the public incident API, Grafana webhook, dashboard
+      API and the dashboard's static viewer.
     * ``worker`` - the Cloud Tasks worker and internal recovery only.
 
     Cloud Run authenticates at the **service** level, so one service cannot
@@ -75,6 +84,19 @@ def create_app(service_role: str | None = None) -> FastAPI:
     if role in {"all", "api"}:
         application.include_router(incidents_router)
         application.include_router(grafana_router)
+        application.include_router(dashboard_router)
+
+        # Static single-page viewer for the dashboard. The assets carry
+        # no secrets (they only call the authenticated dashboard API),
+        # so they are served directly; every data read behind them is
+        # gated by the incident API's HTTP Basic credentials, which the
+        # browser prompts for natively. ``html=True`` serves
+        # ``index.html`` for ``/dashboard/``.
+        application.mount(
+            "/dashboard",
+            StaticFiles(directory=DASHBOARD_STATIC_DIR, html=True),
+            name="dashboard",
+        )
 
     if role in {"all", "worker"}:
         application.include_router(worker_router)
